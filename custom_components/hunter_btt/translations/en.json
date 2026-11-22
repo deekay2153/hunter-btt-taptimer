@@ -1,0 +1,45 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Hunter BTT Tap Timer",
+        "description": "Close the Hunter app first: the timer accepts one connection at a time. Pick the timer, or type its Bluetooth address if it isn't listed. Choose two outlets only if your timer has two hose outputs.",
+        "data": {
+          "address": "Timer",
+          "name": "Name",
+          "outlets": "Outlets"
+        }
+      }
+    },
+    "error": {
+      "bad_address": "That doesn't look like a Bluetooth address (AA:BB:CC:DD:EE:FF)."
+    },
+    "abort": {
+      "already_configured": "This timer is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Hunter BTT Tap Timer",
+        "description": "Change the number of outlets. The timer reloads when you save.",
+        "data": {
+          "outlets": "Outlets"
+        }
+      }
+    }
+  },
+  "entity": {
+    "switch": {
+      "outlet": { "name": "Outlet {outlet}" }
+    },
+    "number": {
+      "run_time": { "name": "Outlet {outlet} run time" }
+    },
+    "sensor": {
+      "time_remaining": { "name": "Outlet {outlet} time remaining" },
+      "battery": { "name": "Battery" },
+      "raw_status": { "name": "Raw status" }
+    }
+  }
+}
