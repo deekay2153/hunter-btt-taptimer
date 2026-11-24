@@ -7,7 +7,8 @@ Control a **Hunter BTT Bluetooth tap timer** from Home Assistant over Bluetooth.
 
 > Not affiliated with or endorsed by Hunter Industries. "Hunter" and "BTT" are their trademarks. Use at your own risk.
 
-> ⚠️ **Early version, not yet tested on a real timer.** It was built from how the official Hunter BTT app talks to the timer. If you own a BTT, please try it and [open an issue](https://github.com/deekay2153/hunter-btt-taptimer/issues) with what happened (see [Help confirm it works](#help-confirm-it-works)).
+> ✅ **Older timers (service `FCC0`) confirmed working** by an owner: start, stop and battery all work.
+> Newer timers (service `FF80`) haven't been tried on a real timer yet. If you own one, please try it and [open an issue](https://github.com/deekay2153/hunter-btt-taptimer/issues) with what happened (see [Help confirm it works](#help-confirm-it-works)).
 
 ## What you get
 
@@ -29,8 +30,8 @@ On two-outlet timers, starting one outlet turns off a manual run on the other, t
 
 Both kinds of BTT are supported, and the integration works out which one it's talking to:
 
-- **Newer timers** (Bluetooth service `FF80`): one or two outlets.
-- **Older timers** (Bluetooth service `FCC0`, name usually starts with `BTT`): one outlet. A manual run uses whichever mode the timer is set to in the Hunter app (timed or cycle-and-soak), up to 3 hours here.
+- **Newer timers** (Bluetooth service `FF80`): one or two outlets. Not yet confirmed on a real timer.
+- **Older timers** (Bluetooth service `FCC0`, name usually starts with `BTT`): one outlet. A manual run uses whichever mode the timer is set to in the Hunter app (timed or cycle-and-soak), up to 3 hours here. Confirmed working.
 
 ## Requirements
 
@@ -60,6 +61,23 @@ Both kinds of BTT are supported, and the integration works out which one it's ta
 There's no passcode to enter. The timer doesn't check one over Bluetooth (the Hunter app does that on the phone).
 
 **Close the Hunter app first.** The timer takes one Bluetooth connection at a time.
+
+## Low battery alert
+
+A flat battery means no watering, so it's worth a warning. Swap in your own battery sensor and phone:
+
+```yaml
+automation:
+  - alias: Tap timer battery low
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.veggie_patch_battery
+        below: 20
+    actions:
+      - action: notify.mobile_app_your_phone
+        data:
+          message: "Veggie patch tap timer battery is at {{ states('sensor.veggie_patch_battery') }}%. Time for new batteries."
+```
 
 ## How it talks to the timer
 
