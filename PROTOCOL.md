@@ -62,14 +62,26 @@ Outlet state in `FF82`: **`1` = idle**, **`17` (0x11) = manual watering**. Other
 
 ## Older timers (service `0xFCC0`, name starts with `BTT`)
 
-Characteristics `FCC1`–`FCF2`. Each value is wrapped as `header byte, length byte, data`, and two-byte numbers are high byte first. Highlights:
+One outlet, with two watering modes: **timed** (characteristics `FCD*`) and **cycle-and-soak** (`FCE*`). Characteristics run from `FCC1` to `FCF2`.
 
-- `FCC1` passcode (same idea as `FF81`).
-- `FCC2` / `FCC3` current and selected mode, `FCC4` clock.
-- `FCD1` / `FCE1` state, `FCD9` / `FCEB` manual control (a control byte plus minutes), `FCD8` / `FCEA` off, `FCD6` rain delay days.
-- Notifications on `FCD1`, `FCD2`, `FCD6`, `FCD9`, `FCE1`, `FCE6`, `FCE7`, `FCEB`.
+Each value is wrapped as `header byte, length byte, data`, both when read and when written. The header is the characteristic's low byte minus `0x70`, so `FCD9` → `0x69` and `FCEB` → `0x7B`. Two-byte numbers are high byte first.
 
-The app has less detail here, so treat this part as rough.
+| Char | What it is |
+|---|---|
+| `FCC1` | Passcode, 4 ASCII bytes (same idea as `FF81`). **Don't write.** |
+| `FCC2` | Current mode: `1` timed, `2` cycle-and-soak |
+| `FCC3` | Selected mode (`0` timed, `1` cycle). The app writes it on connect to match `FCC2` |
+| `FCC4` | Clock: hour, minute, second, weekday |
+| `FCD1` / `FCE1` | Detail state for timed / cycle mode |
+| `FCD9` / `FCEB` | **Manual run** for timed / cycle mode: control (`1` on, `0` off), then minutes (2 bytes, up to 360). Notifies control `0` when the run ends |
+| `FCD8` / `FCEA` | Off switch for each mode. **Don't write** |
+| `FCD2`–`FCD7`, `FCE2`–`FCE9`, `FCD6` | Schedule, start times, rain delay days. **Don't write** |
+
+### Start, stop, status (older timers)
+
+- **Status:** read `FCD9` and `FCEB`. Control `1` on either = watering.
+- **Start for N minutes:** read `FCC2` for the mode, then write `[header, 3, 1, minutes high, minutes low]` to that mode's manual characteristic (`FCD9` for timed, `FCEB` for cycle).
+- **Stop:** write the same with control `0`, keeping the minutes.
 
 ## Standard services the app also reads
 
@@ -82,6 +94,7 @@ The app has less detail here, so treat this part as rough.
 - **TI OAD firmware update**, service `f000ffc0-0451-4000-b000-000000000000`, characteristics `f000ffc1`–`f000ffc5`. Writing here can brick the timer.
 - `FF9F` debug.
 - `FF81` / `FCC1` passcode (it would change or clear the owner's passcode).
+- Older timers: everything except `FCD9` / `FCEB`.
 - Schedule, name and photo characteristics (`FF85`–`FF8D`, `FF90`–`FF9C`, `FFA0`/`FFA1`). Not needed for watering on demand, and a bad write would scramble the owner's program.
 
 ## Gaps only a real timer can fill
@@ -91,7 +104,7 @@ The app has less detail here, so treat this part as rough.
 - How long the timer stays connectable, and whether it sleeps between advertisements (battery device).
 - Whether a one-outlet timer ignores the outlet 2 fields.
 - The exact meaning of each mode and "special" value beyond what's listed.
-- The older (`FCC0`) generation in general.
+- Whether reading `FCD9` / `FCEB` reliably shows control `1` for the whole run on older timers.
 
 ## Read-only checks a BTT owner can run
 

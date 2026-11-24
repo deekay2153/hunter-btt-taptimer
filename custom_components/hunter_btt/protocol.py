@@ -60,9 +60,10 @@ class HunterBtt:
         self.hass = hass
         self.address = address
         self.name = name
+        self.old: bool | None = None  # older FCC0 timer? Known after the first connection.
         self._lock = asyncio.Lock()
 
-    async def _session(self, work: Callable[[_Guarded], Awaitable[T]]) -> T:
+    async def _session(self, work: Callable[[_Guarded, bool], Awaitable[T]]) -> T:
         async with self._lock:
             device = bluetooth.async_ble_device_from_address(self.hass, self.address, connectable=True)
             if device is None:
@@ -74,23 +75,36 @@ class HunterBtt:
             except Exception as err:  # noqa: BLE001 - bleak/proxy errors vary
                 raise BttError(f"{type(err).__name__}: {err}") from err
 
-    async def _run(self, device, work: Callable[[_Guarded], Awaitable[T]]) -> T:
+    async def _run(self, device, work: Callable[[_Guarded, bool], Awaitable[T]]) -> T:
         client = await establish_connection(BleakClient, device, self.name, max_attempts=3)
         try:
             g = _Guarded(client, self.name)
-            if client.services.get_service(codec.SERVICE) is None:
-                if client.services.get_service(codec.OLD_SERVICE) is not None:
-                    raise BttError("this is an older BTT (service FCC0); only newer timers (FF80) are supported")
-                raise BttError("Hunter BTT service FF80 not found: is this the right device?")
-            return await work(g)
+            if client.services.get_service(codec.SERVICE) is not None:
+                self.old = False
+            elif client.services.get_service(codec.OLD_SERVICE) is not None:
+                self.old = True
+            else:
+                raise BttError("no Hunter BTT service (FF80 or FCC0) found: is this the right device?")
+            return await work(g, self.old)
         finally:
             await client.disconnect()
+
+    @staticmethod
+    async def _old_status(g: _Guarded) -> codec.Status:
+        mode_raw = await g.read(codec.OLD_MODE)
+        manual_raw = {m: await g.read(u) for m, u in codec.OLD_MANUAL.items()}
+        manual = {m: codec.parse_old_manual(codec.OLD_MANUAL[m], r) for m, r in manual_raw.items()}
+        raw = mode_raw + manual_raw[1] + manual_raw[2]
+        return codec.old_status(codec.parse_old_mode(mode_raw), manual, raw)
+
+    async def _status(self, g: _Guarded, old: bool) -> codec.Status:
+        return await self._old_status(g) if old else codec.parse_status(await g.read(codec.STATUS))
 
     async def poll(self, full: bool) -> dict[str, Any]:
         """Status every time; battery and firmware too when full."""
 
-        async def work(g: _Guarded) -> dict[str, Any]:
-            out: dict[str, Any] = {"status": codec.parse_status(await g.read(codec.STATUS))}
+        async def work(g: _Guarded, old: bool) -> dict[str, Any]:
+            out: dict[str, Any] = {"status": await self._status(g, old)}
             if full:
                 bat = await g.read_optional(codec.BATTERY)
                 fw = await g.read_optional(codec.FIRMWARE)
@@ -101,28 +115,43 @@ class HunterBtt:
         return await self._session(work)
 
     async def start(self, outlet: int, minutes: int) -> codec.Status:
-        async def work(g: _Guarded) -> codec.Status:
-            settings_uuid = codec.OUTLET_SETTINGS[outlet]
-            await g.write(settings_uuid, codec.set_manual_time(await g.read(settings_uuid), minutes))
-            await g.write(codec.CONTROL, codec.control_start(await g.read(codec.CONTROL), outlet))
+        async def work(g: _Guarded, old: bool) -> codec.Status:
+            if old:
+                if outlet != 1:
+                    raise BttError("older BTT timers have one outlet")
+                # Like the app: the manual run goes to the characteristic of the mode the timer is in.
+                uuid = codec.OLD_MANUAL[codec.parse_old_mode(await g.read(codec.OLD_MODE))]
+                codec.parse_old_manual(uuid, await g.read(uuid))  # check the frame before writing
+                await g.write(uuid, codec.old_manual(uuid, True, minutes))
+            else:
+                settings_uuid = codec.OUTLET_SETTINGS[outlet]
+                await g.write(settings_uuid, codec.set_manual_time(await g.read(settings_uuid), minutes))
+                await g.write(codec.CONTROL, codec.control_start(await g.read(codec.CONTROL), outlet))
             await asyncio.sleep(1)
-            return codec.parse_status(await g.read(codec.STATUS))
+            return await self._status(g, old)
 
         return await self._session(work)
 
     async def stop(self, outlet: int) -> codec.Status:
-        async def work(g: _Guarded) -> codec.Status:
-            await g.write(codec.CONTROL, codec.control_stop(await g.read(codec.CONTROL), outlet))
+        async def work(g: _Guarded, old: bool) -> codec.Status:
+            if old:
+                # Turn off whichever mode's manual run is on (both if unsure), keeping its minutes.
+                current = {u: codec.parse_old_manual(u, await g.read(u)) for u in codec.OLD_MANUAL.values()}
+                targets = [u for u, (on, _) in current.items() if on] or list(current)
+                for u in targets:
+                    await g.write(u, codec.old_manual(u, False, current[u][1]))
+            else:
+                await g.write(codec.CONTROL, codec.control_stop(await g.read(codec.CONTROL), outlet))
             await asyncio.sleep(1)
-            return codec.parse_status(await g.read(codec.STATUS))
+            return await self._status(g, old)
 
         return await self._session(work)
 
     async def snapshot(self) -> dict[str, str | None]:
         """Raw hex of every readable characteristic, for diagnostics. Never the passcode."""
 
-        async def work(g: _Guarded) -> dict[str, str | None]:
-            out: dict[str, str | None] = {}
+        async def work(g: _Guarded, old: bool) -> dict[str, str | None]:
+            out: dict[str, str | None] = {"generation": "older (FCC0)" if old else "newer (FF80)"}
             for uuid in sorted(codec.ALLOWED_READS):
                 data = await g.read_optional(uuid)
                 out[uuid[4:8].upper()] = data.hex(" ") if data is not None else None

@@ -23,11 +23,14 @@ For each timer:
 
 The run time is sent to the timer with each start, so the **timer turns the water off by itself** when the time is up, even if Home Assistant or Bluetooth drops out.
 
-Starting one outlet turns off a manual run on the other outlet, the same as the Hunter app does.
+On two-outlet timers, starting one outlet turns off a manual run on the other, the same as the Hunter app does.
 
 ## Which timers
 
-Only **newer BTT timers** (Bluetooth service `FF80`). Older ones whose Bluetooth name starts with `BTT` use a different layout (service `FCC0`) and are refused with a clear error. One- and two-outlet models are both supported.
+Both kinds of BTT are supported, and the integration works out which one it's talking to:
+
+- **Newer timers** (Bluetooth service `FF80`): one or two outlets.
+- **Older timers** (Bluetooth service `FCC0`, name usually starts with `BTT`): one outlet. A manual run uses whichever mode the timer is set to in the Hunter app (timed or cycle-and-soak), up to 3 hours here.
 
 ## Requirements
 
@@ -97,8 +100,7 @@ logger:
 |---|---|
 | Timer missing from the list | Close the Hunter app, check the proxy hears it in the advertisement monitor, or type the address. |
 | "not in range of a Bluetooth adapter or proxy" | Move a proxy closer. It must be able to connect, not just hear the timer. |
-| "older BTT (service FCC0)" | Your timer is the older kind. Not supported yet: please open an issue so it can be added. |
-| "service FF80 not found" | The address isn't a BTT, or the wrong device was picked. |
+| "no Hunter BTT service found" | The address isn't a BTT, or the wrong device was picked. |
 | Switch turns back off right after starting | Please report it with the raw status and diagnostics. The byte layout may need a fix. |
 
 ## Protocol

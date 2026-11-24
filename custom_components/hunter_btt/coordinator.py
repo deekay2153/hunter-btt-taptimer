@@ -29,7 +29,8 @@ class BttCoordinator(DataUpdateCoordinator[codec.Status]):
         self.firmware: str | None = None
 
     def is_running(self, outlet: int) -> bool:
-        return bool(self.data) and self.data.outlets[outlet].running
+        o = self.data.outlets.get(outlet) if self.data else None
+        return bool(o and o.running)
 
     def remaining(self, outlet: int) -> int:
         end = self.ends_at.get(outlet)
@@ -38,6 +39,8 @@ class BttCoordinator(DataUpdateCoordinator[codec.Status]):
         return max(0, int((end - dt_util.utcnow()).total_seconds()))
 
     def _apply(self, status: codec.Status) -> codec.Status:
+        # Older timers have one outlet, whatever was picked at setup.
+        self.outlets = [n for n in self.outlets if n in status.outlets] or [1]
         for n in self.outlets:
             if not status.outlets[n].running:
                 self.ends_at[n] = None

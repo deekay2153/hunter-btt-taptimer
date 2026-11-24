@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Hunter BTT Tap Timer",
-        "description": "Close the Hunter app first: the timer accepts one connection at a time. Pick the timer, or type its Bluetooth address if it isn't listed. Choose two outlets only if your timer has two hose outputs.",
+        "description": "Close the Hunter app first: the timer accepts one connection at a time. Pick the timer, or type its Bluetooth address if it isn't listed. Choose two outlets only if your timer has two hose outputs. Older timers always get one.",
         "data": {
           "address": "Timer",
           "name": "Name",

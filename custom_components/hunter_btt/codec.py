@@ -1,4 +1,4 @@
-"""Byte layouts for the newer Hunter BTT (service 0xFF80). Pure Python, no Home Assistant imports.
+"""Byte layouts for the Hunter BTT (newer: service 0xFF80, older: 0xFCC0). Pure Python, no Home Assistant imports.
 
 See PROTOCOL.md in the repo. Worked out from the official app, not yet confirmed on a real timer.
 """
@@ -12,7 +12,7 @@ def uuid16(short: int) -> str:
 
 
 SERVICE = uuid16(0xFF80)
-OLD_SERVICE = uuid16(0xFCC0)  # older timers whose name starts with "BTT": not supported
+OLD_SERVICE = uuid16(0xFCC0)  # older one-outlet timers whose name starts with "BTT"
 STATUS = uuid16(0xFF82)  # 14 bytes, read only here
 CONTROL = uuid16(0xFF83)  # 12 bytes
 CLOCK = uuid16(0xFF84)
@@ -20,11 +20,22 @@ OUTLET_SETTINGS = {1: uuid16(0xFF86), 2: uuid16(0xFF8B)}  # 17 bytes each
 BATTERY = uuid16(0x2A19)
 FIRMWARE = uuid16(0x2A26)
 
+# Older timers: one outlet, two modes. Each value is framed as header, length, data;
+# the header is the characteristic's low byte minus 0x70. Two-byte numbers are high byte first.
+OLD_MODE = uuid16(0xFCC2)  # current mode: 1 timed, 2 cycle-and-soak
+OLD_STATE = {1: uuid16(0xFCD1), 2: uuid16(0xFCE1)}  # per-mode detail state, read for diagnostics
+OLD_MANUAL = {1: uuid16(0xFCD9), 2: uuid16(0xFCEB)}  # per-mode manual run: control (1 on / 0 off), minutes
+OLD_MODE_TIMED, OLD_MODE_CYCLE = 1, 2
+OLD_MAX_MINUTES = 360
+
 # The only characteristics this integration ever touches. Everything else, above all the
-# TI OAD firmware service (f000ffc0-0451-...), the debug char 0xFF9F and the passcode 0xFF81,
-# is refused in protocol.py.
-ALLOWED_READS = {STATUS, CONTROL, CLOCK, *OUTLET_SETTINGS.values(), BATTERY, FIRMWARE}
-ALLOWED_WRITES = {CONTROL, *OUTLET_SETTINGS.values()}
+# TI OAD firmware service (f000ffc0-0451-...), the debug char 0xFF9F and the passcodes
+# 0xFF81 / 0xFCC1, is refused in protocol.py.
+ALLOWED_READS = {
+    STATUS, CONTROL, CLOCK, *OUTLET_SETTINGS.values(), BATTERY, FIRMWARE,
+    OLD_MODE, *OLD_STATE.values(), *OLD_MANUAL.values(),
+}
+ALLOWED_WRITES = {CONTROL, *OUTLET_SETTINGS.values(), *OLD_MANUAL.values()}
 
 STATUS_LEN = 14
 CONTROL_LEN = 12
@@ -142,3 +153,54 @@ def control_stop(control: bytes, outlet: int) -> bytes:
     b[C_MANUAL[outlet]] = 0
     b[C_SPECIAL] = 0
     return bytes(b)
+
+
+# ---- older timers (service 0xFCC0) ----
+
+
+def old_header(uuid: str) -> int:
+    return int(uuid[4:8], 16) - 0xFC70
+
+
+def unframe(uuid: str, data: bytes) -> bytes:
+    """Data part of an older timer's value: header, length, data."""
+    if len(data) < 2 or data[0] != old_header(uuid):
+        raise CodecError(f"{uuid[4:8]}: unexpected frame {data.hex(' ')}")
+    return bytes(data[2 : 2 + data[1]])
+
+
+def frame(uuid: str, payload: bytes) -> bytes:
+    return bytes([old_header(uuid), len(payload)]) + payload
+
+
+def parse_old_mode(data: bytes) -> int:
+    """1 timed or 2 cycle-and-soak. Anything else is treated as timed, like the app."""
+    p = unframe(OLD_MODE, data)
+    return OLD_MODE_CYCLE if p and p[0] == OLD_MODE_CYCLE else OLD_MODE_TIMED
+
+
+def parse_old_manual(uuid: str, data: bytes) -> tuple[bool, int]:
+    """(running, minutes) from a manual-run characteristic."""
+    p = unframe(uuid, data)
+    if len(p) < 3:
+        raise CodecError(f"{uuid[4:8]}: manual run is {len(p)} bytes, expected 3: {data.hex(' ')}")
+    return p[0] == 1, int.from_bytes(p[1:3], "big")
+
+
+def old_manual(uuid: str, run: bool, minutes: int) -> bytes:
+    if uuid not in OLD_MANUAL.values():
+        raise CodecError(f"{uuid} is not a manual-run characteristic")
+    if run and not 1 <= minutes <= OLD_MAX_MINUTES:
+        raise CodecError(f"run time {minutes} min is outside 1-{OLD_MAX_MINUTES}")
+    return frame(uuid, bytes([1 if run else 0]) + max(0, minutes).to_bytes(2, "big"))
+
+
+def old_status(mode: int, manual: dict[int, tuple[bool, int]], raw: bytes) -> Status:
+    """One outlet. It's watering if either mode's manual run is on."""
+    running = any(on for on, _ in manual.values())
+    return Status(
+        enabled=True,
+        suspend=0,
+        outlets={1: Outlet(enabled=1, mode=mode, manual=running, state=0)},
+        raw=raw,
+    )
